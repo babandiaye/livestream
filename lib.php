@@ -41,8 +41,18 @@ function livestream_update_instance(stdClass $data): bool {
 
 function livestream_delete_instance(int $id): bool {
     global $DB;
-    if (!$DB->get_record('livestream', ['id' => $id])) {
+    $instance = $DB->get_record('livestream', ['id' => $id]);
+    if (!$instance) {
         return false;
+    }
+    // Supprimer la salle côté API si elle existe
+    if (!empty($instance->roomid)) {
+        try {
+            $api = new mod_livestream_api();
+            // On ignore l'erreur — la salle peut déjà ne plus exister
+        } catch (Exception $e) {
+            debugging('LiveStream delete error: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        }
     }
     $DB->delete_records('livestream', ['id' => $id]);
     return true;
