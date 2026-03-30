@@ -2,7 +2,6 @@
 defined('MOODLE_INTERNAL') || die();
 
 class mod_livestream_api {
-
     private string $baseUrl;
     private string $apiKey;
     private int    $timeout;
@@ -11,6 +10,27 @@ class mod_livestream_api {
         $this->baseUrl = rtrim(get_config('mod_livestream', 'apiurl'), '/');
         $this->apiKey  = get_config('mod_livestream', 'apikey');
         $this->timeout = (int)(get_config('mod_livestream', 'apitimeout') ?: 30);
+    }
+
+    /**
+     * Valide qu'un ID ne contient que des caractères alphanumériques/tirets
+     * Protège contre les attaques path traversal (../, injection URL)
+     */
+    private function validateId(string $id, string $param = 'id'): string {
+        if (empty($id) || !preg_match('/^[a-zA-Z0-9_-]+$/', $id)) {
+            throw new moodle_exception('invalidparameter', 'mod_livestream', '', $param);
+        }
+        return $id;
+    }
+
+    /**
+     * Valide que l'email est bien formé avant envoi à l'API
+     */
+    private function validateEmail(string $email): string {
+        if (!validate_email($email)) {
+            throw new moodle_exception('invalidparameter', 'mod_livestream', '', 'email');
+        }
+        return $email;
     }
 
     private function request(string $method, string $path, array $data = []): array {
@@ -49,13 +69,17 @@ class mod_livestream_api {
             throw new moodle_exception('apierror', 'mod_livestream', '', $curlError);
         }
 
+        if ($response === false || $response === '') {
+            throw new moodle_exception('apierror', 'mod_livestream', '', 'Réponse vide du serveur');
+        }
+
         $decoded = json_decode($response, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new moodle_exception('apierror', 'mod_livestream', '', 'Reponse invalide: ' . $response);
+            throw new moodle_exception('apierror', 'mod_livestream', '', 'Réponse invalide du serveur');
         }
 
         if ($httpCode >= 400) {
-            $msg = $decoded['error'] ?? 'Erreur inconnue';
+            $msg = $decoded['error'] ?? 'Erreur inconnue (HTTP ' . $httpCode . ')';
             throw new moodle_exception('apierror', 'mod_livestream', '', $msg);
         }
 
@@ -68,42 +92,58 @@ class mod_livestream_api {
             'meetingId'      => $meetingId,
             'title'          => $title,
             'description'    => $description,
-            'moderatorEmail' => $moderatorEmail,
+            'moderatorEmail' => $this->validateEmail($moderatorEmail),
         ]);
     }
 
     public function getRoomStatus(string $roomId): array {
+        $roomId = $this->validateId($roomId, 'roomId');
         return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/status');
     }
 
     public function getRecordings(string $roomId): array {
+        $roomId = $this->validateId($roomId, 'roomId');
         return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/recordings');
     }
 
     public function joinRoom(string $roomId, string $userEmail, string $userName): array {
+        $roomId = $this->validateId($roomId, 'roomId');
         return $this->request('POST', '/api/moodle/join', [
             'roomId'    => $roomId,
-            'userEmail' => $userEmail,
+            'userEmail' => $this->validateEmail($userEmail),
             'userName'  => $userName,
         ]);
     }
 
     public function startRoom(string $roomId, string $moderatorEmail, string $moderatorName): array {
+        $roomId = $this->validateId($roomId, 'roomId');
         return $this->request('POST', '/api/moodle/start', [
             'roomId'         => $roomId,
-            'moderatorEmail' => $moderatorEmail,
+            'moderatorEmail' => $this->validateEmail($moderatorEmail),
             'moderatorName'  => $moderatorName,
         ]);
     }
 
     public function enrollUsers(string $roomId, array $emails): array {
+        $roomId = $this->validateId($roomId, 'roomId');
+        // Valider chaque email
+        $validEmails = [];
+        foreach ($emails as $email) {
+            if (validate_email($email)) {
+                $validEmails[] = $email;
+            }
+        }
+        if (empty($validEmails)) {
+            throw new moodle_exception('invalidparameter', 'mod_livestream', '', 'emails');
+        }
         return $this->request('POST', '/api/moodle/enroll', [
             'roomId' => $roomId,
-            'emails' => $emails,
+            'emails' => $validEmails,
         ]);
     }
 
     public function deleteRecording(string $recordingId): array {
+        $recordingId = $this->validateId($recordingId, 'recordingId');
         return $this->request('DELETE', '/api/moodle/recordings/' . $recordingId);
     }
 }
