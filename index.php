@@ -1,7 +1,6 @@
 <?php
-defined('MOODLE_INTERNAL') || die();
-
 require_once('../../config.php');
+defined('MOODLE_INTERNAL') || die();
 require_once('lib.php');
 
 $id = optional_param('id', 0, PARAM_INT);
