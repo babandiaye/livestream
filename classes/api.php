@@ -10,12 +10,16 @@ class mod_livestream_api {
         $this->baseUrl = rtrim(get_config('mod_livestream', 'apiurl'), '/');
         $this->apiKey  = get_config('mod_livestream', 'apikey');
         $this->timeout = (int)(get_config('mod_livestream', 'apitimeout') ?: 30);
+
+        // Validation config obligatoire
+        if (empty($this->baseUrl) || empty($this->apiKey)) {
+            throw new moodle_exception('apinotconfigured', 'mod_livestream');
+        }
+        if (!filter_var($this->baseUrl, FILTER_VALIDATE_URL)) {
+            throw new moodle_exception('invalidapiurl', 'mod_livestream');
+        }
     }
 
-    /**
-     * Valide qu'un ID ne contient que des caractères alphanumériques/tirets
-     * Protège contre les attaques path traversal (../, injection URL)
-     */
     private function validateId(string $id, string $param = 'id'): string {
         if (empty($id) || !preg_match('/^[a-zA-Z0-9_-]+$/', $id)) {
             throw new moodle_exception('invalidparameter', 'mod_livestream', '', $param);
@@ -23,9 +27,6 @@ class mod_livestream_api {
         return $id;
     }
 
-    /**
-     * Valide que l'email est bien formé avant envoi à l'API
-     */
     private function validateEmail(string $email): string {
         if (!validate_email($email)) {
             throw new moodle_exception('invalidparameter', 'mod_livestream', '', 'email');
@@ -43,20 +44,30 @@ class mod_livestream_api {
         ];
 
         curl_setopt_array($curl, [
-            CURLOPT_URL            => $url,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => $this->timeout,
-            CURLOPT_HTTPHEADER     => $headers,
-            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_URL             => $url,
+            CURLOPT_RETURNTRANSFER  => true,
+            CURLOPT_TIMEOUT         => $this->timeout,
+            CURLOPT_CONNECTTIMEOUT  => 10,
+            CURLOPT_HTTPHEADER      => $headers,
+            CURLOPT_SSL_VERIFYPEER  => true,
+            CURLOPT_SSL_VERIFYHOST  => 2,
         ]);
 
         if ($method === 'POST') {
+            $payload = json_encode($data);
+            if ($payload === false) {
+                throw new moodle_exception('jsonencodeerror', 'mod_livestream');
+            }
             curl_setopt($curl, CURLOPT_POST, true);
-            curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($data));
+            curl_setopt($curl, CURLOPT_POSTFIELDS, $payload);
         } elseif ($method === 'DELETE') {
             curl_setopt($curl, CURLOPT_CUSTOMREQUEST, 'DELETE');
             if (!empty($data)) {
-                curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($data));
+                $payload = json_encode($data);
+                if ($payload === false) {
+                    throw new moodle_exception('jsonencodeerror', 'mod_livestream');
+                }
+                curl_setopt($curl, CURLOPT_POSTFIELDS, $payload);
             }
         }
 
@@ -83,7 +94,7 @@ class mod_livestream_api {
             throw new moodle_exception('apierror', 'mod_livestream', '', $msg);
         }
 
-        return $decoded;
+        return is_array($decoded) ? $decoded : [];
     }
 
     public function createRoom(string $courseId, string $meetingId, string $title, string $moderatorEmail, string $description = ''): array {
@@ -126,7 +137,6 @@ class mod_livestream_api {
 
     public function enrollUsers(string $roomId, array $emails): array {
         $roomId = $this->validateId($roomId, 'roomId');
-        // Valider chaque email
         $validEmails = [];
         foreach ($emails as $email) {
             if (validate_email($email)) {
