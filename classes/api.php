@@ -11,7 +11,6 @@ class mod_livestream_api {
         $this->apiKey  = get_config('mod_livestream', 'apikey');
         $this->timeout = (int)(get_config('mod_livestream', 'apitimeout') ?: 30);
 
-        // Validation config obligatoire
         if (empty($this->baseUrl) || empty($this->apiKey)) {
             throw new moodle_exception('apinotconfigured', 'mod_livestream');
         }
@@ -34,6 +33,16 @@ class mod_livestream_api {
         return $email;
     }
 
+    // V08 — sanitiser userName avant envoi API
+    private function sanitizeUserName(string $name): string {
+        $name = clean_param($name, PARAM_TEXT);
+        $name = mb_substr(trim($name), 0, 100);
+        if (empty($name)) {
+            $name = 'Utilisateur';
+        }
+        return $name;
+    }
+
     private function request(string $method, string $path, array $data = []): array {
         $url  = $this->baseUrl . $path;
         $curl = curl_init();
@@ -44,13 +53,13 @@ class mod_livestream_api {
         ];
 
         curl_setopt_array($curl, [
-            CURLOPT_URL             => $url,
-            CURLOPT_RETURNTRANSFER  => true,
-            CURLOPT_TIMEOUT         => $this->timeout,
-            CURLOPT_CONNECTTIMEOUT  => 10,
-            CURLOPT_HTTPHEADER      => $headers,
-            CURLOPT_SSL_VERIFYPEER  => true,
-            CURLOPT_SSL_VERIFYHOST  => 2,
+            CURLOPT_URL            => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => $this->timeout,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_HTTPHEADER     => $headers,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
         ]);
 
         if ($method === 'POST') {
@@ -76,8 +85,11 @@ class mod_livestream_api {
         $curlError = curl_error($curl);
         curl_close($curl);
 
+        // V10 — message générique sans données sensibles
         if ($curlError) {
-            throw new moodle_exception('apierror', 'mod_livestream', '', $curlError);
+            debugging('LiveStream cURL error: ' . $curlError, DEBUG_DEVELOPER);
+            throw new moodle_exception('apierror', 'mod_livestream', '',
+                'Erreur de communication avec le serveur de streaming');
         }
 
         if ($response === false || $response === '') {
@@ -118,7 +130,8 @@ class mod_livestream_api {
     }
 
     public function joinRoom(string $roomId, string $userEmail, string $userName): array {
-        $roomId = $this->validateId($roomId, 'roomId');
+        $roomId   = $this->validateId($roomId, 'roomId');
+        $userName = $this->sanitizeUserName($userName); // V08
         return $this->request('POST', '/api/moodle/join', [
             'roomId'    => $roomId,
             'userEmail' => $this->validateEmail($userEmail),
@@ -127,7 +140,8 @@ class mod_livestream_api {
     }
 
     public function startRoom(string $roomId, string $moderatorEmail, string $moderatorName): array {
-        $roomId = $this->validateId($roomId, 'roomId');
+        $roomId        = $this->validateId($roomId, 'roomId');
+        $moderatorName = $this->sanitizeUserName($moderatorName); // V08
         return $this->request('POST', '/api/moodle/start', [
             'roomId'         => $roomId,
             'moderatorEmail' => $this->validateEmail($moderatorEmail),
@@ -136,7 +150,7 @@ class mod_livestream_api {
     }
 
     public function enrollUsers(string $roomId, array $emails): array {
-        $roomId = $this->validateId($roomId, 'roomId');
+        $roomId      = $this->validateId($roomId, 'roomId');
         $validEmails = [];
         foreach ($emails as $email) {
             if (validate_email($email)) {
