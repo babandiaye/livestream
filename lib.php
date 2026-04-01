@@ -7,29 +7,33 @@ function livestream_add_instance(stdClass $data, mod_livestream_mod_form $mform 
     $data->timecreated  = time();
     $data->timemodified = time();
 
-    $id = $DB->insert_record('livestream', $data);
-
+    $transaction = $DB->start_delegated_transaction();
     try {
-        $api            = new mod_livestream_api();
-        $moderatorEmail = $USER->email;
-        $result         = $api->createRoom(
+        $id = $DB->insert_record('livestream', $data);
+
+        $api    = new mod_livestream_api();
+        $result = $api->createRoom(
             (string)$data->course,
             (string)$id,
             $data->name,
-            $moderatorEmail,
+            $USER->email,
             $data->intro ?? ''
         );
+
         $DB->set_field('livestream', 'roomid',   $result['roomId'],   ['id' => $id]);
         $DB->set_field('livestream', 'roomname', $result['roomName'], ['id' => $id]);
 
         if (get_config('mod_livestream', 'autoenroll')) {
             livestream_sync_enrollments($data->course, $result['roomId']);
         }
-    } catch (Exception $e) {
-        debugging('LiveStream createRoom error: ' . $e->getMessage());
-    }
 
-    return $id;
+        $transaction->allow_commit();
+        return $id;
+
+    } catch (Exception $e) {
+        $transaction->rollback($e);
+        throw $e;
+    }
 }
 
 function livestream_update_instance(stdClass $data): bool {
@@ -45,11 +49,9 @@ function livestream_delete_instance(int $id): bool {
     if (!$instance) {
         return false;
     }
-    // Supprimer la salle côté API si elle existe
     if (!empty($instance->roomid)) {
         try {
             $api = new mod_livestream_api();
-            // On ignore l'erreur — la salle peut déjà ne plus exister
         } catch (Exception $e) {
             debugging('LiveStream delete error: ' . $e->getMessage(), DEBUG_DEVELOPER);
         }
