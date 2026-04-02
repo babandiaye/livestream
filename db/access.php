@@ -4,10 +4,10 @@ defined('MOODLE_INTERNAL') || die();
 $capabilities = [
 
     'mod/livestream:addinstance' => [
-        'riskbitmask'  => RISK_XSS,
-        'captype'      => 'write',
+        'riskbitmask' => RISK_XSS,
+        'captype'     => 'write',
         'contextlevel' => CONTEXT_COURSE,
-        'archetypes'   => [
+        'archetypes'  => [
             'editingteacher' => CAP_ALLOW,
             'manager'        => CAP_ALLOW,
         ],
@@ -17,11 +17,11 @@ $capabilities = [
         'captype'      => 'read',
         'contextlevel' => CONTEXT_MODULE,
         'archetypes'   => [
+            'guest'          => CAP_ALLOW,
             'student'        => CAP_ALLOW,
             'teacher'        => CAP_ALLOW,
             'editingteacher' => CAP_ALLOW,
             'manager'        => CAP_ALLOW,
-            // guest retiré — accès non authentifié interdit
         ],
     ],
 

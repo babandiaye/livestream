@@ -27,82 +27,35 @@ $joinError   = '';
 $startError  = '';
 $deleteError = '';
 
-// V01 + V06 — validation que l'URL retournée appartient au domaine autorisé
-function livestream_validate_redirect_url(string $url): string {
-    $allowedHost  = parse_url(get_config('mod_livestream', 'apiurl'), PHP_URL_HOST);
-    $returnedHost = parse_url($url, PHP_URL_HOST);
-    // Accepte le domaine exact et ses sous-domaines (CDN, load balancer)
-    if (empty($returnedHost) || (
-        $returnedHost !== $allowedHost &&
-        !str_ends_with($returnedHost, '.' . $allowedHost)
-    )) {
-        throw new moodle_exception('invalidresponse', 'mod_livestream');
-    }
-    return $url;
-}
-
-// V05 — rate limiting : max 5 tentatives par minute par utilisateur
-function livestream_check_ratelimit(string $actionKey): void {
-    global $USER;
-    $cache    = cache::make('mod_livestream', 'ratelimit');
-    $cacheKey = $actionKey . '_' . $USER->id;
-    $count    = (int)($cache->get($cacheKey) ?: 0);
-    if ($count >= 5) {
-        throw new moodle_exception('apierror', 'mod_livestream', '',
-            'Trop de tentatives. Veuillez patienter une minute.');
-    }
-    $cache->set($cacheKey, $count + 1);
-}
-
 // ── JOIN ─────────────────────────────────────────────────────────────────────
 if ($action === 'join' && !empty($instance->roomid)) {
-    require_sesskey(); // V02 — protection CSRF
-    livestream_check_ratelimit('join'); // V05
     try {
         $api    = new mod_livestream_api();
         $result = $api->joinRoom($instance->roomid, $USER->email, fullname($USER));
         if (empty($result['url'])) {
             throw new moodle_exception('invalidresponse', 'mod_livestream');
         }
-        $validatedUrl = livestream_validate_redirect_url($result['url']); // V01+V06
-        $watchUrl     = $validatedUrl . '&returnUrl=' . urlencode($returnUrl);
-        // V09 — journalisation audit
-        \mod_livestream\event\session_joined::create([
-            'context'    => $context,
-            'objectid'   => $instance->id,
-            'courseid'   => $course->id,
-            'userid'     => $USER->id,
-        ])->trigger();
+        $watchUrl = $result['url'] . '&returnUrl=' . urlencode($returnUrl);
         redirect($watchUrl);
     } catch (Exception $e) {
         $joinError = $e->getMessage();
-        debugging('LiveStream join error', DEBUG_DEVELOPER);
+        debugging($e->getMessage(), DEBUG_DEVELOPER);
     }
 }
 
 // ── START ────────────────────────────────────────────────────────────────────
 if ($action === 'start' && $isModerator && !empty($instance->roomid)) {
-    require_sesskey(); // V02 — protection CSRF
-    livestream_check_ratelimit('start'); // V05
     try {
         $api    = new mod_livestream_api();
         $result = $api->startRoom($instance->roomid, $USER->email, fullname($USER));
         if (empty($result['url'])) {
             throw new moodle_exception('invalidresponse', 'mod_livestream');
         }
-        $validatedUrl = livestream_validate_redirect_url($result['url']); // V01+V06
-        $hostUrl      = $validatedUrl . '&returnUrl=' . urlencode($returnUrl);
-        // V09 — journalisation audit
-        \mod_livestream\event\session_started::create([
-            'context'    => $context,
-            'objectid'   => $instance->id,
-            'courseid'   => $course->id,
-            'userid'     => $USER->id,
-        ])->trigger();
+        $hostUrl = $result['url'] . '&returnUrl=' . urlencode($returnUrl);
         redirect($hostUrl);
     } catch (Exception $e) {
         $startError = $e->getMessage();
-        debugging('LiveStream start error', DEBUG_DEVELOPER);
+        debugging($e->getMessage(), DEBUG_DEVELOPER);
     }
 }
 
@@ -113,17 +66,10 @@ if ($action === 'deleterecording' && $isModerator) {
     try {
         $api = new mod_livestream_api();
         $api->deleteRecording($recordingId);
-        // V09 — journalisation audit
-        \mod_livestream\event\recording_deleted::create([
-            'context'    => $context,
-            'objectid'   => $instance->id,
-            'courseid'   => $course->id,
-            'userid'     => $USER->id,
-        ])->trigger();
         redirect(new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]));
     } catch (Exception $e) {
         $deleteError = $e->getMessage();
-        debugging('LiveStream delete error', DEBUG_DEVELOPER);
+        debugging($e->getMessage(), DEBUG_DEVELOPER);
     }
 }
 
@@ -142,7 +88,7 @@ if (!empty($instance->roomid)) {
     } catch (Exception $e) {
         $apiError    = true;
         $apiErrorMsg = $e->getMessage();
-        debugging('LiveStream API error', DEBUG_DEVELOPER);
+        debugging('LiveStream API error: ' . $e->getMessage(), DEBUG_DEVELOPER);
     }
 }
 
@@ -154,6 +100,7 @@ if (!empty($instance->intro)) {
     echo $OUTPUT->box(format_module_intro('livestream', $instance, $cm->id), 'generalbox', 'intro');
 }
 
+// Erreurs
 if ($joinError) {
     echo $OUTPUT->notification(get_string('error') . ': ' . s($joinError), 'error');
 }
@@ -194,24 +141,14 @@ if ($apiError) {
     echo html_writer::start_div('', ['style' => 'display:flex;gap:10px;flex-wrap:wrap;']);
 
     if ($isModerator) {
-        // V02 — sesskey dans l'URL du bouton start
-        $startUrl = new moodle_url('/mod/livestream/view.php', [
-            'id'      => $cm->id,
-            'action'  => 'start',
-            'sesskey' => sesskey(),
-        ]);
+        $startUrl = new moodle_url('/mod/livestream/view.php', ['id' => $cm->id, 'action' => 'start']);
         echo html_writer::link($startUrl, '▶ Démarrer la session',
             ['style' => 'display:inline-block;padding:10px 24px;background:#0065b1;color:white;border-radius:8px;text-decoration:none;font-weight:600;']
         );
     }
 
     if ($roomStatus === 'LIVE') {
-        // V02 — sesskey dans l'URL du bouton join
-        $joinUrl = new moodle_url('/mod/livestream/view.php', [
-            'id'      => $cm->id,
-            'action'  => 'join',
-            'sesskey' => sesskey(),
-        ]);
+        $joinUrl = new moodle_url('/mod/livestream/view.php', ['id' => $cm->id, 'action' => 'join']);
         echo html_writer::link($joinUrl, '👁 Rejoindre la session',
             ['style' => 'display:inline-block;padding:10px 24px;background:#fff;color:#0065b1;border:1.5px solid #0065b1;border-radius:8px;text-decoration:none;font-weight:600;']
         );
@@ -236,6 +173,7 @@ if (empty($recordings)) {
         '', ['style' => 'color:#9ca3af;padding:8px 0;font-size:0.9rem;']
     );
 } else {
+    // Passer les URLs au JS via data attributes — pas d'injection inline
     $playerData = [];
 
     $table            = new html_table();
@@ -243,9 +181,11 @@ if (empty($recordings)) {
     $table->align     = ['left', 'left', 'left', 'left', 'center'];
 
     foreach ($recordings as $rec) {
+        // Sanitiser l'ID pour usage HTML
         $safeId   = preg_replace('/[^a-zA-Z0-9_-]/', '', $rec['id']);
         $playerId = 'ls-player-' . $safeId;
 
+        // Stocker l'URL côté PHP pour injection JSON sécurisée
         $playerData[$playerId] = $rec['playUrl'];
 
         $viewBtn = html_writer::tag('button', 'Voir', [
@@ -292,6 +232,7 @@ if (empty($recordings)) {
 
     echo html_writer::table($table);
 
+    // Injecter les URLs via JSON — aucune injection possible
     $jsonData = json_encode($playerData, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
     echo html_writer::tag('script', "
 (function() {
