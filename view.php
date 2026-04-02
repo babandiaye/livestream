@@ -29,9 +29,13 @@ $deleteError = '';
 
 // V01 + V06 — validation que l'URL retournée appartient au domaine autorisé
 function livestream_validate_redirect_url(string $url): string {
-    $allowedHost = parse_url(get_config('mod_livestream', 'apiurl'), PHP_URL_HOST);
+    $allowedHost  = parse_url(get_config('mod_livestream', 'apiurl'), PHP_URL_HOST);
     $returnedHost = parse_url($url, PHP_URL_HOST);
-    if (empty($returnedHost) || $returnedHost !== $allowedHost) {
+    // Accepte le domaine exact et ses sous-domaines (CDN, load balancer)
+    if (empty($returnedHost) || (
+        $returnedHost !== $allowedHost &&
+        !str_ends_with($returnedHost, '.' . $allowedHost)
+    )) {
         throw new moodle_exception('invalidresponse', 'mod_livestream');
     }
     return $url;
@@ -62,10 +66,15 @@ if ($action === 'join' && !empty($instance->roomid)) {
         }
         $validatedUrl = livestream_validate_redirect_url($result['url']); // V01+V06
         $watchUrl     = $validatedUrl . '&returnUrl=' . urlencode($returnUrl);
+        // V09 — journalisation audit
+        \mod_livestream\event\session_joined::create([
+            'context'  => $context,
+            'objectid' => $instance->id,
+        ])->trigger();
         redirect($watchUrl);
     } catch (Exception $e) {
         $joinError = $e->getMessage();
-        debugging($e->getMessage(), DEBUG_DEVELOPER);
+        debugging('LiveStream join error', DEBUG_DEVELOPER);
     }
 }
 
@@ -81,10 +90,15 @@ if ($action === 'start' && $isModerator && !empty($instance->roomid)) {
         }
         $validatedUrl = livestream_validate_redirect_url($result['url']); // V01+V06
         $hostUrl      = $validatedUrl . '&returnUrl=' . urlencode($returnUrl);
+        // V09 — journalisation audit
+        \mod_livestream\event\session_started::create([
+            'context'  => $context,
+            'objectid' => $instance->id,
+        ])->trigger();
         redirect($hostUrl);
     } catch (Exception $e) {
         $startError = $e->getMessage();
-        debugging($e->getMessage(), DEBUG_DEVELOPER);
+        debugging('LiveStream start error', DEBUG_DEVELOPER);
     }
 }
 
@@ -95,10 +109,15 @@ if ($action === 'deleterecording' && $isModerator) {
     try {
         $api = new mod_livestream_api();
         $api->deleteRecording($recordingId);
+        // V09 — journalisation audit
+        \mod_livestream\event\recording_deleted::create([
+            'context'  => $context,
+            'objectid' => $instance->id,
+        ])->trigger();
         redirect(new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]));
     } catch (Exception $e) {
         $deleteError = $e->getMessage();
-        debugging($e->getMessage(), DEBUG_DEVELOPER);
+        debugging('LiveStream delete error', DEBUG_DEVELOPER);
     }
 }
 
@@ -117,7 +136,7 @@ if (!empty($instance->roomid)) {
     } catch (Exception $e) {
         $apiError    = true;
         $apiErrorMsg = $e->getMessage();
-        debugging('LiveStream API error: ' . $e->getMessage(), DEBUG_DEVELOPER);
+        debugging('LiveStream API error', DEBUG_DEVELOPER);
     }
 }
 
