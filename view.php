@@ -37,9 +37,23 @@ function livestream_validate_redirect_url(string $url): string {
     return $url;
 }
 
+// V05 — rate limiting : max 5 tentatives par minute par utilisateur
+function livestream_check_ratelimit(string $actionKey): void {
+    global $USER;
+    $cache    = cache::make('mod_livestream', 'ratelimit');
+    $cacheKey = $actionKey . '_' . $USER->id;
+    $count    = (int)($cache->get($cacheKey) ?: 0);
+    if ($count >= 5) {
+        throw new moodle_exception('apierror', 'mod_livestream', '',
+            'Trop de tentatives. Veuillez patienter une minute.');
+    }
+    $cache->set($cacheKey, $count + 1);
+}
+
 // ── JOIN ─────────────────────────────────────────────────────────────────────
 if ($action === 'join' && !empty($instance->roomid)) {
     require_sesskey(); // V02 — protection CSRF
+    livestream_check_ratelimit('join'); // V05
     try {
         $api    = new mod_livestream_api();
         $result = $api->joinRoom($instance->roomid, $USER->email, fullname($USER));
@@ -58,6 +72,7 @@ if ($action === 'join' && !empty($instance->roomid)) {
 // ── START ────────────────────────────────────────────────────────────────────
 if ($action === 'start' && $isModerator && !empty($instance->roomid)) {
     require_sesskey(); // V02 — protection CSRF
+    livestream_check_ratelimit('start'); // V05
     try {
         $api    = new mod_livestream_api();
         $result = $api->startRoom($instance->roomid, $USER->email, fullname($USER));
