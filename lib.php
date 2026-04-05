@@ -27,6 +27,15 @@ function livestream_add_instance(stdClass $data, mod_livestream_mod_form $mform 
             livestream_sync_enrollments($data->course, $result['roomId']);
         }
 
+        // V09 — journalisation audit : salle créée
+        // Note : le context module n'est pas encore disponible à ce stade (l'activité
+        // vient d'être insérée), on utilise le context du cours.
+        $coursecontext = context_course::instance($data->course);
+        \mod_livestream\event\room_created::create([
+            'context'  => $coursecontext,
+            'objectid' => $id,
+        ])->trigger();
+
         $transaction->allow_commit();
         return $id;
 

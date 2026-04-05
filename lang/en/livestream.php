@@ -33,3 +33,9 @@ $string['deleterecording']          = 'Delete';
 $string['viewrecording']            = 'View';
 $string['autoenroll']               = 'Automatic enrollment';
 $string['autoenroll_desc']          = 'Automatically enroll course participants in the LiveStream room';
+
+// V09 — Audit event strings.
+$string['event_session_joined']     = 'LiveStream session joined';
+$string['event_session_started']    = 'LiveStream session started';
+$string['event_recording_deleted']  = 'LiveStream recording deleted';
+$string['event_room_created']       = 'LiveStream room created';

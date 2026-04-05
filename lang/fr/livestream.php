@@ -33,3 +33,9 @@ $string['deleterecording']          = 'Supprimer';
 $string['viewrecording']            = 'Voir';
 $string['autoenroll']               = 'Enrôlement automatique';
 $string['autoenroll_desc']          = 'Enrôler automatiquement les participants du cours dans la salle LiveStream';
+
+// V09 — Chaînes pour les événements d'audit.
+$string['event_session_joined']     = 'Session LiveStream rejointe';
+$string['event_session_started']    = 'Session LiveStream démarrée';
+$string['event_recording_deleted']  = 'Enregistrement LiveStream supprimé';
+$string['event_room_created']       = 'Salle LiveStream créée';

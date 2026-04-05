@@ -65,6 +65,13 @@ if ($action === 'join' && !empty($instance->roomid)) {
             throw new moodle_exception('invalidresponse', 'mod_livestream');
         }
         $validatedUrl = livestream_validate_redirect_url($result['url']); // V01+V06
+
+        // V09 — journalisation audit : session rejointe
+        \mod_livestream\event\session_joined::create([
+            'context'  => $context,
+            'objectid' => $instance->id,
+        ])->trigger();
+
         $watchUrl     = $validatedUrl . '&returnUrl=' . urlencode($returnUrl);
         redirect($watchUrl);
     } catch (Exception $e) {
@@ -84,6 +91,13 @@ if ($action === 'start' && $isModerator && !empty($instance->roomid)) {
             throw new moodle_exception('invalidresponse', 'mod_livestream');
         }
         $validatedUrl = livestream_validate_redirect_url($result['url']); // V01+V06
+
+        // V09 — journalisation audit : session démarrée
+        \mod_livestream\event\session_started::create([
+            'context'  => $context,
+            'objectid' => $instance->id,
+        ])->trigger();
+
         $hostUrl      = $validatedUrl . '&returnUrl=' . urlencode($returnUrl);
         redirect($hostUrl);
     } catch (Exception $e) {
@@ -99,6 +113,14 @@ if ($action === 'deleterecording' && $isModerator) {
     try {
         $api = new mod_livestream_api();
         $api->deleteRecording($recordingId);
+
+        // V09 — journalisation audit : enregistrement supprimé
+        \mod_livestream\event\recording_deleted::create([
+            'context'  => $context,
+            'objectid' => $instance->id,
+            'other'    => ['recordingid' => $recordingId],
+        ])->trigger();
+
         redirect(new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]));
     } catch (Exception $e) {
         $deleteError = $e->getMessage();
