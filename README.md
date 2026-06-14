@@ -5,7 +5,7 @@ intégrées à Moodle via la plateforme **LiveStream UN-CHK** (backend Next.js /
 LiveKit).
 
 - **Composant** : `mod_livestream`
-- **Version** : 1.2.2-security-audit (`2026040500`)
+- **Version** : 1.3.0-groups (`2026061400`)
 - **Maturité** : BETA
 - **Compatibilité** : Moodle 4.5+ (`requires = 2024100700`)
 
@@ -57,8 +57,40 @@ La page liste les enregistrements de la salle (nom, date, durée) avec :
 - un lecteur vidéo intégré (lecture inline sans quitter Moodle) ;
 - la suppression d'un enregistrement pour les modérateurs (`deleteRecording`).
 
+### Enregistrements liés au serveur webinaire (modèle BBB)
+Les enregistrements sont mis en **cache local** (table `livestream_recordings`)
+et **taggés avec le serveur** (`apiurl`) d'où ils proviennent :
+
+- la page n'affiche que les enregistrements du **serveur actuellement configuré** ;
+- **changer de serveur** (réglage `apiurl`) **masque** les enregistrements des
+  autres serveurs — leurs lignes sont **conservées**, pas détruites ;
+- **revenir** à un serveur précédent **ré-affiche** ses enregistrements ;
+- une **tâche planifiée** (`\mod_livestream\task\sync_recordings`, toutes les
+  5 minutes) rafraîchit le cache depuis le serveur courant ; la vue effectue
+  aussi une synchronisation best-effort de la salle consultée ;
+- l'élagage (suppression d'un enregistrement disparu côté serveur) est limité au
+  couple (serveur, salle) synchronisé : les autres serveurs ne sont jamais touchés.
+
 ### Liste des activités du cours
 `index.php` affiche l'ensemble des activités LiveStream d'un cours.
+
+### Mode groupe — une salle par groupe (approche A)
+Lorsque l'activité est configurée en **mode groupe** (groupes séparés ou
+visibles), chaque groupe du cours dispose de **sa propre salle LiveStream** :
+
+- un sélecteur de groupe s'affiche en haut de l'activité ;
+- la salle d'un groupe est identifiée par un **meetingId composite**
+  (`{instanceid}-g{groupid}`) ; le groupe 0 (« tous ») conserve la salle de base
+  historique ;
+- la salle d'un groupe est **créée à la demande** au premier démarrage par un
+  modérateur (création paresseuse, sans table supplémentaire) ;
+- en « groupes séparés », un étudiant n'accède qu'à la salle de **son** groupe
+  (contrôle assuré par `groups_get_activity_group`) ;
+- statut, participation et enregistrements sont **propres à chaque groupe**.
+
+> Côté plateforme, ce mode s'appuie sur la route backend
+> `GET /api/moodle/rooms/by-meeting/{meetingId}/status`, qui résout la salle d'un
+> groupe sans la créer.
 
 ### Journalisation d'audit
 Quatre événements Moodle sont déclenchés et consultables dans les journaux :
@@ -172,6 +204,8 @@ Le plugin a fait l'objet d'un audit de sécurité (repères `V01`–`V10`) :
 
 | Version | Faits marquants |
 |---|---|
+| 1.4.0-recordings | Enregistrements liés au serveur : cache local taggé par serveur + tâche cron de synchronisation (modèle BBB) |
+| 1.3.0-groups | Mode groupe : une salle LiveStream distincte par groupe (approche A, création paresseuse, accès filtré par groupe) |
 | 1.2.2-security-audit | Audit de sécurité (V01–V10), événements d'audit, rate limiting |
 
 > À compléter à chaque nouvelle fonctionnalité intégrée.
