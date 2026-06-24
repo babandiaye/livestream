@@ -34,9 +34,6 @@ $string['viewrecording']            = 'Voir';
 $string['autoenroll']               = 'Enrôlement automatique';
 $string['autoenroll_desc']          = 'Enrôler automatiquement les participants du cours dans la salle LiveStream';
 
-// Tâche planifiée (cron).
-$string['task_sync_recordings']     = 'Synchronisation des enregistrements LiveStream';
-
 // V09 — Chaînes pour les événements d'audit.
 $string['event_session_joined']     = 'Session LiveStream rejointe';
 $string['event_session_started']    = 'Session LiveStream démarrée';

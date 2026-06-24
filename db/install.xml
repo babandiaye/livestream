@@ -18,30 +18,5 @@
         <KEY NAME="course"  TYPE="foreign" FIELDS="course" REFTABLE="course" REFFIELDS="id"/>
       </KEYS>
     </TABLE>
-    <TABLE NAME="livestream_recordings" COMMENT="Cache local des enregistrements LiveStream, taggés par serveur webinaire">
-      <FIELDS>
-        <FIELD NAME="id"           TYPE="int"  LENGTH="10"  NOTNULL="true" SEQUENCE="true"/>
-        <FIELD NAME="livestreamid" TYPE="int"  LENGTH="10"  NOTNULL="true" COMMENT="Instance livestream"/>
-        <FIELD NAME="courseid"     TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
-        <FIELD NAME="groupid"      TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0" COMMENT="0 = tous"/>
-        <FIELD NAME="serverurl"    TYPE="char" LENGTH="255" NOTNULL="true" COMMENT="apiurl d'où provient l'enregistrement"/>
-        <FIELD NAME="roomid"       TYPE="char" LENGTH="255" NOTNULL="false"/>
-        <FIELD NAME="recordingid"  TYPE="char" LENGTH="255" NOTNULL="true" COMMENT="ID enregistrement côté serveur"/>
-        <FIELD NAME="name"         TYPE="char" LENGTH="255" NOTNULL="false"/>
-        <FIELD NAME="duration"     TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0" COMMENT="durée en secondes"/>
-        <FIELD NAME="recdate"      TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0" COMMENT="date de l'enregistrement"/>
-        <FIELD NAME="playurl"      TYPE="text" NOTNULL="false"/>
-        <FIELD NAME="timecreated"  TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
-        <FIELD NAME="timemodified" TYPE="int"  LENGTH="10"  NOTNULL="true" DEFAULT="0"/>
-      </FIELDS>
-      <KEYS>
-        <KEY NAME="primary"      TYPE="primary" FIELDS="id"/>
-        <KEY NAME="livestreamid" TYPE="foreign" FIELDS="livestreamid" REFTABLE="livestream" REFFIELDS="id"/>
-      </KEYS>
-      <INDEXES>
-        <INDEX NAME="instance_server_group" UNIQUE="false" FIELDS="livestreamid, serverurl, groupid"/>
-        <INDEX NAME="recordingid"           UNIQUE="false" FIELDS="recordingid"/>
-      </INDEXES>
-    </TABLE>
   </TABLES>
 </XMLDB>

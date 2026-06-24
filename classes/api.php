@@ -124,13 +124,6 @@ class mod_livestream_api {
         return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/status');
     }
 
-    // Approche A (groupes) — résout la salle d'un groupe par son meetingId composite,
-    // sans la créer. Renvoie ['exists' => false, ...] si la salle n'existe pas encore.
-    public function getRoomStatusByMeeting(string $meetingId): array {
-        $meetingId = $this->validateId($meetingId, 'meetingId');
-        return $this->request('GET', '/api/moodle/rooms/by-meeting/' . rawurlencode($meetingId) . '/status');
-    }
-
     public function getRecordings(string $roomId): array {
         $roomId = $this->validateId($roomId, 'roomId');
         return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/recordings');

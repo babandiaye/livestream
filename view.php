@@ -20,45 +20,12 @@ $PAGE->set_heading(format_string($course->fullname));
 $PAGE->set_activity_record($instance);
 
 $isModerator = has_capability('mod/livestream:moderate', $context);
+$returnUrl   = (new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]))->out(false);
 $action      = optional_param('action', '', PARAM_ALPHA);
 
 $joinError   = '';
 $startError  = '';
 $deleteError = '';
-
-// ── GROUPES (approche A) ─────────────────────────────────────────────────────
-// Mode groupe de l'activité. Le 2e paramètre (true) demande à Moodle d'afficher
-// le sélecteur et de restreindre le groupe actif à ceux visibles par l'utilisateur
-// (en « groupes séparés », un étudiant est limité à son propre groupe).
-$activegroup = (int)(groups_get_activity_group($cm, true) ?: 0);
-$meetingid   = livestream_meetingid_for_group((int)$instance->id, $activegroup);
-
-// URL de retour (conserve le groupe courant).
-$returnparams = ['id' => $cm->id];
-if ($activegroup > 0) {
-    $returnparams['group'] = $activegroup;
-}
-$returnUrl = (new moodle_url('/mod/livestream/view.php', $returnparams))->out(false);
-
-// Résolution de la salle du groupe courant.
-//  - Groupe 0 avec salle de base déjà créée : on utilise le roomid stocké (aucun appel API).
-//  - Sinon (groupe N, ou salle de base manquante) : on résout par meetingId (sans créer).
-$activeroomid = '';
-$groupstatus  = null;
-if ($activegroup === 0 && !empty($instance->roomid)) {
-    $activeroomid = $instance->roomid;
-} else {
-    try {
-        $resolveapi = new mod_livestream_api();
-        $resolved   = $resolveapi->getRoomStatusByMeeting($meetingid);
-        if (!empty($resolved['exists'])) {
-            $activeroomid = $resolved['roomId'];
-            $groupstatus  = $resolved;
-        }
-    } catch (Exception $e) {
-        debugging('LiveStream group resolve error', DEBUG_DEVELOPER);
-    }
-}
 
 // V01 + V06 — validation que l'URL retournée appartient au domaine autorisé
 function livestream_validate_redirect_url(string $url): string {
@@ -88,15 +55,12 @@ function livestream_check_ratelimit(string $actionKey): void {
 }
 
 // ── JOIN ─────────────────────────────────────────────────────────────────────
-if ($action === 'join') {
+if ($action === 'join' && !empty($instance->roomid)) {
     require_sesskey(); // V02 — protection CSRF
     livestream_check_ratelimit('join'); // V05
     try {
-        if (empty($activeroomid)) {
-            throw new moodle_exception('invalidresponse', 'mod_livestream');
-        }
         $api    = new mod_livestream_api();
-        $result = $api->joinRoom($activeroomid, $USER->email, fullname($USER));
+        $result = $api->joinRoom($instance->roomid, $USER->email, fullname($USER));
         if (empty($result['url'])) {
             throw new moodle_exception('invalidresponse', 'mod_livestream');
         }
@@ -117,42 +81,12 @@ if ($action === 'join') {
 }
 
 // ── START ────────────────────────────────────────────────────────────────────
-if ($action === 'start' && $isModerator) {
+if ($action === 'start' && $isModerator && !empty($instance->roomid)) {
     require_sesskey(); // V02 — protection CSRF
     livestream_check_ratelimit('start'); // V05
     try {
-        $api = new mod_livestream_api();
-
-        // Création paresseuse de la salle du groupe au premier démarrage (approche A).
-        if (empty($activeroomid)) {
-            $roomtitle = $instance->name;
-            if ($activegroup > 0) {
-                $groupname = groups_get_group_name($activegroup);
-                if ($groupname) {
-                    $roomtitle .= ' (' . $groupname . ')';
-                }
-            }
-            $created      = $api->createRoom(
-                (string)$course->id,
-                $meetingid,
-                $roomtitle,
-                $USER->email,
-                $instance->intro ?? ''
-            );
-            $activeroomid = $created['roomId'] ?? '';
-
-            // Salle de base (groupe 0) : on persiste le roomid pour les prochains chargements.
-            if ($activegroup === 0 && !empty($created['roomId'])) {
-                $DB->set_field('livestream', 'roomid',   $created['roomId'],       ['id' => $instance->id]);
-                $DB->set_field('livestream', 'roomname', $created['roomName'] ?? '', ['id' => $instance->id]);
-            }
-        }
-
-        if (empty($activeroomid)) {
-            throw new moodle_exception('invalidresponse', 'mod_livestream');
-        }
-
-        $result = $api->startRoom($activeroomid, $USER->email, fullname($USER));
+        $api    = new mod_livestream_api();
+        $result = $api->startRoom($instance->roomid, $USER->email, fullname($USER));
         if (empty($result['url'])) {
             throw new moodle_exception('invalidresponse', 'mod_livestream');
         }
@@ -180,12 +114,6 @@ if ($action === 'deleterecording' && $isModerator) {
         $api = new mod_livestream_api();
         $api->deleteRecording($recordingId);
 
-        // Purge du cache local pour le serveur actif.
-        $DB->delete_records('livestream_recordings', [
-            'serverurl'   => livestream_current_server(),
-            'recordingid' => $recordingId,
-        ]);
-
         // V09 — journalisation audit : enregistrement supprimé
         \mod_livestream\event\recording_deleted::create([
             'context'  => $context,
@@ -193,7 +121,7 @@ if ($action === 'deleterecording' && $isModerator) {
             'other'    => ['recordingid' => $recordingId],
         ])->trigger();
 
-        redirect(new moodle_url('/mod/livestream/view.php', $returnparams));
+        redirect(new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]));
     } catch (Exception $e) {
         $deleteError = $e->getMessage();
         debugging('LiveStream delete error', DEBUG_DEVELOPER);
@@ -206,35 +134,17 @@ $recordings  = [];
 $apiError    = false;
 $apiErrorMsg = '';
 
-if (!empty($activeroomid)) {
+if (!empty($instance->roomid)) {
     try {
-        $api    = new mod_livestream_api();
-        // Réutilise le statut déjà résolu par meetingId (groupes), sinon interroge.
-        $status = $groupstatus ?: $api->getRoomStatus($activeroomid);
+        $api        = new mod_livestream_api();
+        $status     = $api->getRoomStatus($instance->roomid);
+        $recData    = $api->getRecordings($instance->roomid);
+        $recordings = $recData['recordings'] ?? [];
     } catch (Exception $e) {
         $apiError    = true;
         $apiErrorMsg = $e->getMessage();
         debugging('LiveStream API error', DEBUG_DEVELOPER);
     }
-    // Rafraîchit le cache des enregistrements de la salle courante (best-effort).
-    livestream_sync_room_recordings((int)$instance->id, (int)$course->id, $activegroup, $activeroomid);
-}
-
-// Enregistrements visibles : uniquement ceux du serveur webinaire actif (modèle BBB).
-// Changer de serveur masque les autres ; revenir à un serveur les ré-affiche.
-$cachedrecs = $DB->get_records('livestream_recordings', [
-    'livestreamid' => $instance->id,
-    'serverurl'    => livestream_current_server(),
-    'groupid'      => $activegroup,
-], 'recdate DESC');
-foreach ($cachedrecs as $cr) {
-    $recordings[] = [
-        'id'       => $cr->recordingid,
-        'name'     => $cr->name,
-        'duration' => $cr->duration,
-        'date'     => (int)$cr->recdate,
-        'playUrl'  => $cr->playurl,
-    ];
 }
 
 // ── OUTPUT ───────────────────────────────────────────────────────────────────
@@ -244,9 +154,6 @@ echo $OUTPUT->heading(format_string($instance->name));
 if (!empty($instance->intro)) {
     echo $OUTPUT->box(format_module_intro('livestream', $instance, $cm->id), 'generalbox', 'intro');
 }
-
-// Sélecteur de groupe (n'affiche rien si l'activité n'est pas en mode groupe).
-groups_print_activity_menu($cm, new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]));
 
 if ($joinError) {
     echo $OUTPUT->notification(get_string('error') . ': ' . s($joinError), 'error');
@@ -263,9 +170,7 @@ echo html_writer::start_div('', ['style' => 'margin:16px 0;padding:24px;backgrou
 
 if ($apiError) {
     echo $OUTPUT->notification(s($apiErrorMsg), 'warning');
-} else {
-    // Si la salle du groupe n'existe pas encore, statut « planifiée » par défaut ;
-    // le modérateur peut la démarrer (création paresseuse via action=start).
+} elseif (!empty($instance->roomid) && $status) {
     $roomStatus = $status['status'] ?? 'SCHEDULED';
 
     if ($roomStatus === 'LIVE') {
@@ -294,7 +199,6 @@ if ($apiError) {
         $startUrl = new moodle_url('/mod/livestream/view.php', [
             'id'      => $cm->id,
             'action'  => 'start',
-            'group'   => $activegroup,
             'sesskey' => sesskey(),
         ]);
         echo html_writer::link($startUrl, '▶ Démarrer la session',
@@ -302,12 +206,11 @@ if ($apiError) {
         );
     }
 
-    if ($roomStatus === 'LIVE' && !empty($activeroomid)) {
+    if ($roomStatus === 'LIVE') {
         // V02 — sesskey dans l'URL du bouton join
         $joinUrl = new moodle_url('/mod/livestream/view.php', [
             'id'      => $cm->id,
             'action'  => 'join',
-            'group'   => $activegroup,
             'sesskey' => sesskey(),
         ]);
         echo html_writer::link($joinUrl, '👁 Rejoindre la session',
@@ -320,6 +223,8 @@ if ($apiError) {
     }
 
     echo html_writer::end_div();
+} else {
+    echo $OUTPUT->notification('Aucune salle associée à cette activité.', 'warning');
 }
 
 echo html_writer::end_div();
@@ -359,8 +264,7 @@ if (empty($recordings)) {
             ? round((int)$rec['duration'] / 60) . ' min'
             : '—';
 
-        $rectimestamp = is_numeric($rec['date']) ? (int)$rec['date'] : strtotime($rec['date']);
-        $date = userdate($rectimestamp,
+        $date = userdate(strtotime($rec['date']),
             get_string('strftimedatefullshort', 'langconfig')
         );
 
