@@ -1,0 +1,6 @@
+
+# Secrets / variables d'environnement (garder env.example)
+.env
+.env.*
+env.*
+!env.example
