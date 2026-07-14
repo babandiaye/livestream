@@ -1,6 +1,33 @@
 <?php
 defined('MOODLE_INTERNAL') || die();
 
+// V13 — logique de (re)création de salle, partagée entre la création initiale de
+// l'activité (livestream_add_instance) et l'action "créer la salle" de view.php
+// (utilisée quand roomid est vide : après restauration, duplication ou import
+// d'activité, cas où roomid/roomname sont volontairement réinitialisés — voir
+// restore_livestream_stepslib.php).
+function livestream_create_room(stdClass $instance, int $courseId, string $moderatorEmail): array {
+    global $DB;
+
+    $api    = new mod_livestream_api();
+    $result = $api->createRoom(
+        (string)$courseId,
+        (string)$instance->id,
+        $instance->name,
+        $moderatorEmail,
+        $instance->intro ?? ''
+    );
+
+    $DB->set_field('livestream', 'roomid',   $result['roomId'],   ['id' => $instance->id]);
+    $DB->set_field('livestream', 'roomname', $result['roomName'], ['id' => $instance->id]);
+
+    if (get_config('mod_livestream', 'autoenroll')) {
+        livestream_sync_enrollments($courseId, $result['roomId']);
+    }
+
+    return $result;
+}
+
 function livestream_add_instance(stdClass $data, mod_livestream_mod_form $mform = null): int {
     global $DB, $USER;
 
@@ -10,22 +37,9 @@ function livestream_add_instance(stdClass $data, mod_livestream_mod_form $mform 
     $transaction = $DB->start_delegated_transaction();
     try {
         $id = $DB->insert_record('livestream', $data);
+        $data->id = $id;
 
-        $api    = new mod_livestream_api();
-        $result = $api->createRoom(
-            (string)$data->course,
-            (string)$id,
-            $data->name,
-            $USER->email,
-            $data->intro ?? ''
-        );
-
-        $DB->set_field('livestream', 'roomid',   $result['roomId'],   ['id' => $id]);
-        $DB->set_field('livestream', 'roomname', $result['roomName'], ['id' => $id]);
-
-        if (get_config('mod_livestream', 'autoenroll')) {
-            livestream_sync_enrollments($data->course, $result['roomId']);
-        }
+        livestream_create_room($data, $data->course, $USER->email);
 
         // V09 — journalisation audit : salle créée
         // Note : le context module n'est pas encore disponible à ce stade (l'activité

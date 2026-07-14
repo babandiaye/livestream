@@ -23,9 +23,10 @@ $isModerator = has_capability('mod/livestream:moderate', $context);
 $returnUrl   = (new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]))->out(false);
 $action      = optional_param('action', '', PARAM_ALPHA);
 
-$joinError   = '';
-$startError  = '';
-$deleteError = '';
+$joinError       = '';
+$startError      = '';
+$deleteError     = '';
+$createRoomError = '';
 
 // V01 + V06 — validation que l'URL retournée appartient au domaine autorisé
 function livestream_validate_redirect_url(string $url): string {
@@ -129,6 +130,30 @@ if ($action === 'deleterecording' && $isModerator) {
     }
 }
 
+// ── CRÉER LA SALLE ──────────────────────────────────────────────────────────
+// V13 — (re)création de salle quand roomid est vide : cas d'une activité
+// restaurée, dupliquée ou importée (voir restore_livestream_stepslib.php), qui
+// n'a volontairement pas conservé l'ancienne association pour éviter que deux
+// cours partagent la même salle vidéo externe.
+if ($action === 'createroom' && $isModerator && empty($instance->roomid)) {
+    require_sesskey(); // V02 — protection CSRF
+    livestream_check_ratelimit('createroom'); // V05
+    try {
+        livestream_create_room($instance, $course->id, $USER->email);
+
+        // V09 — journalisation audit : salle créée
+        \mod_livestream\event\room_created::create([
+            'context'  => $context,
+            'objectid' => $instance->id,
+        ])->trigger();
+
+        redirect(new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]));
+    } catch (Exception $e) {
+        $createRoomError = $e->getMessage();
+        debugging('LiveStream createroom error', DEBUG_DEVELOPER);
+    }
+}
+
 // ── API ──────────────────────────────────────────────────────────────────────
 $status      = null;
 $recordings  = [];
@@ -164,6 +189,9 @@ if ($startError) {
 }
 if ($deleteError) {
     echo $OUTPUT->notification(get_string('error') . ': ' . s($deleteError), 'error');
+}
+if ($createRoomError) {
+    echo $OUTPUT->notification(get_string('error') . ': ' . s($createRoomError), 'error');
 }
 
 // Statut + boutons
@@ -226,6 +254,17 @@ if ($apiError) {
     echo html_writer::end_div();
 } else {
     echo $OUTPUT->notification('Aucune salle associée à cette activité.', 'warning');
+    if ($isModerator) {
+        // V13 — sesskey dans l'URL du bouton createroom
+        $createRoomUrl = new moodle_url('/mod/livestream/view.php', [
+            'id'      => $cm->id,
+            'action'  => 'createroom',
+            'sesskey' => sesskey(),
+        ]);
+        echo html_writer::link($createRoomUrl, '🔧 Créer la salle',
+            ['style' => 'display:inline-block;margin-top:10px;padding:10px 24px;background:#0065b1;color:white;border-radius:8px;text-decoration:none;font-weight:600;']
+        );
+    }
 }
 
 echo html_writer::end_div();
