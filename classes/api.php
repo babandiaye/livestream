@@ -1,6 +1,20 @@
 <?php
 defined('MOODLE_INTERNAL') || die();
 
+// V11 — exception bas niveau : porte le code HTTP (0 = pas de réponse / erreur réseau)
+// et le message brut de l'API, pour permettre aux méthodes publiques de mod_livestream_api
+// de choisir le bon message utilisateur selon le contexte de l'appel.
+class mod_livestream_api_response_exception extends \Exception {
+    public int $httpcode;
+    public string $apimessage;
+
+    public function __construct(int $httpcode, string $apimessage) {
+        $this->httpcode   = $httpcode;
+        $this->apimessage = $apimessage;
+        parent::__construct($apimessage);
+    }
+}
+
 class mod_livestream_api {
     private string $baseUrl;
     private string $apiKey;
@@ -85,68 +99,112 @@ class mod_livestream_api {
         $curlError = curl_error($curl);
         curl_close($curl);
 
-        // V10 — message générique sans données sensibles
+        // V10 — message générique sans données sensibles côté cURL (pas de fuite d'infra),
+        // mais toujours journalisé pour les développeurs. V11 — httpcode=0 signale "pas de
+        // réponse HTTP" (réseau/timeout), distinct d'une réponse HTTP d'erreur.
         if ($curlError) {
             debugging('LiveStream cURL error: ' . $curlError, DEBUG_DEVELOPER);
-            throw new moodle_exception('apierror', 'mod_livestream', '',
+            throw new mod_livestream_api_response_exception(0,
                 'Erreur de communication avec le serveur de streaming');
         }
 
         if ($response === false || $response === '') {
-            throw new moodle_exception('apierror', 'mod_livestream', '', 'Réponse vide du serveur');
+            throw new mod_livestream_api_response_exception(0, 'Réponse vide du serveur');
         }
 
         $decoded = json_decode($response, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new moodle_exception('apierror', 'mod_livestream', '', 'Réponse invalide du serveur');
+            throw new mod_livestream_api_response_exception($httpCode, 'Réponse invalide du serveur');
         }
 
         if ($httpCode >= 400) {
             $msg = $decoded['error'] ?? 'Erreur inconnue (HTTP ' . $httpCode . ')';
-            throw new moodle_exception('apierror', 'mod_livestream', '', $msg);
+            // V11 — désormais journalisé (auparavant silencieux pour les erreurs HTTP).
+            debugging('LiveStream API error HTTP ' . $httpCode . ': ' . $msg, DEBUG_DEVELOPER);
+            throw new mod_livestream_api_response_exception($httpCode, $msg);
         }
 
         return is_array($decoded) ? $decoded : [];
     }
 
+    // V11 — traduit l'exception bas niveau en message utilisateur actionnable.
+    // $notenrolled404 : pour certains endpoints (ex. création de salle), un 404 signifie
+    // spécifiquement "compte modérateur introuvable", pas "salle introuvable".
+    private function translateApiException(
+        mod_livestream_api_response_exception $e,
+        bool $notenrolled404 = false
+    ): moodle_exception {
+        $debuginfo = 'HTTP ' . $e->httpcode;
+
+        if ($e->httpcode === 0) {
+            return new moodle_exception('errorconnection', 'mod_livestream', '', null, $debuginfo);
+        }
+        if ($e->httpcode === 403 || ($notenrolled404 && $e->httpcode === 404)) {
+            return new moodle_exception('errornotenrolled', 'mod_livestream', '', $e->apimessage, $debuginfo);
+        }
+        return new moodle_exception('apierror', 'mod_livestream', '', $e->apimessage, $debuginfo);
+    }
+
     public function createRoom(string $courseId, string $meetingId, string $title, string $moderatorEmail, string $description = ''): array {
-        return $this->request('POST', '/api/moodle/rooms', [
-            'courseId'       => $courseId,
-            'meetingId'      => $meetingId,
-            'title'          => $title,
-            'description'    => $description,
-            'moderatorEmail' => $this->validateEmail($moderatorEmail),
-        ]);
+        try {
+            return $this->request('POST', '/api/moodle/rooms', [
+                'courseId'       => $courseId,
+                'meetingId'      => $meetingId,
+                'title'          => $title,
+                'description'    => $description,
+                'moderatorEmail' => $this->validateEmail($moderatorEmail),
+            ]);
+        } catch (mod_livestream_api_response_exception $e) {
+            // Sur cet endpoint, un 404 signifie "compte modérateur introuvable" (V11).
+            throw $this->translateApiException($e, true);
+        }
     }
 
     public function getRoomStatus(string $roomId): array {
         $roomId = $this->validateId($roomId, 'roomId');
-        return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/status');
+        try {
+            return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/status');
+        } catch (mod_livestream_api_response_exception $e) {
+            throw $this->translateApiException($e);
+        }
     }
 
     public function getRecordings(string $roomId): array {
         $roomId = $this->validateId($roomId, 'roomId');
-        return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/recordings');
+        try {
+            return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/recordings');
+        } catch (mod_livestream_api_response_exception $e) {
+            throw $this->translateApiException($e);
+        }
     }
 
     public function joinRoom(string $roomId, string $userEmail, string $userName): array {
         $roomId   = $this->validateId($roomId, 'roomId');
         $userName = $this->sanitizeUserName($userName); // V08
-        return $this->request('POST', '/api/moodle/join', [
-            'roomId'    => $roomId,
-            'userEmail' => $this->validateEmail($userEmail),
-            'userName'  => $userName,
-        ]);
+        try {
+            return $this->request('POST', '/api/moodle/join', [
+                'roomId'    => $roomId,
+                'userEmail' => $this->validateEmail($userEmail),
+                'userName'  => $userName,
+            ]);
+        } catch (mod_livestream_api_response_exception $e) {
+            throw $this->translateApiException($e);
+        }
     }
 
     public function startRoom(string $roomId, string $moderatorEmail, string $moderatorName): array {
         $roomId        = $this->validateId($roomId, 'roomId');
         $moderatorName = $this->sanitizeUserName($moderatorName); // V08
-        return $this->request('POST', '/api/moodle/start', [
-            'roomId'         => $roomId,
-            'moderatorEmail' => $this->validateEmail($moderatorEmail),
-            'moderatorName'  => $moderatorName,
-        ]);
+        try {
+            return $this->request('POST', '/api/moodle/start', [
+                'roomId'         => $roomId,
+                'moderatorEmail' => $this->validateEmail($moderatorEmail),
+                'moderatorName'  => $moderatorName,
+            ]);
+        } catch (mod_livestream_api_response_exception $e) {
+            // Sur cet endpoint, un 403 signifie "pas encore modérateur" (V11).
+            throw $this->translateApiException($e);
+        }
     }
 
     public function enrollUsers(string $roomId, array $emails): array {
@@ -160,14 +218,22 @@ class mod_livestream_api {
         if (empty($validEmails)) {
             throw new moodle_exception('invalidparameter', 'mod_livestream', '', 'emails');
         }
-        return $this->request('POST', '/api/moodle/enroll', [
-            'roomId' => $roomId,
-            'emails' => $validEmails,
-        ]);
+        try {
+            return $this->request('POST', '/api/moodle/enroll', [
+                'roomId' => $roomId,
+                'emails' => $validEmails,
+            ]);
+        } catch (mod_livestream_api_response_exception $e) {
+            throw $this->translateApiException($e);
+        }
     }
 
     public function deleteRecording(string $recordingId): array {
         $recordingId = $this->validateId($recordingId, 'recordingId');
-        return $this->request('DELETE', '/api/moodle/recordings/' . $recordingId);
+        try {
+            return $this->request('DELETE', '/api/moodle/recordings/' . $recordingId);
+        } catch (mod_livestream_api_response_exception $e) {
+            throw $this->translateApiException($e);
+        }
     }
 }

@@ -48,8 +48,9 @@ function livestream_check_ratelimit(string $actionKey): void {
     $cacheKey = $actionKey . '_' . $USER->id;
     $count    = (int)($cache->get($cacheKey) ?: 0);
     if ($count >= 5) {
-        throw new moodle_exception('apierror', 'mod_livestream', '',
-            'Trop de tentatives. Veuillez patienter une minute.');
+        // V11 — chaîne dédiée : ce n'est pas une erreur de la plateforme LiveStream,
+        // c'est une limite locale Moodle.
+        throw new moodle_exception('errorratelimit', 'mod_livestream');
     }
     $cache->set($cacheKey, $count + 1);
 }
