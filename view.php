@@ -42,6 +42,25 @@ function livestream_validate_redirect_url(string $url): string {
     return $url;
 }
 
+// V14 — petites icônes SVG inline (habillage visuel), aucune dépendance externe.
+function livestream_icon(string $name, int $size = 18): string {
+    $paths = [
+        'play'  => '<circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon>',
+        'eye'   => '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>',
+        'check' => '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>',
+        'clock' => '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>',
+        'video' => '<polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>',
+        'trash' => '<polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>',
+        'tool'  => '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>',
+    ];
+    if (!isset($paths[$name])) {
+        return '';
+    }
+    return '<svg width="' . $size . '" height="' . $size . '" viewBox="0 0 24 24" fill="none" ' .
+        'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ' .
+        'style="flex-shrink:0;">' . $paths[$name] . '</svg>';
+}
+
 // V05 — rate limiting : max 5 tentatives par minute par utilisateur
 function livestream_check_ratelimit(string $actionKey): void {
     global $USER;
@@ -194,34 +213,55 @@ if ($createRoomError) {
     echo $OUTPUT->notification(get_string('error') . ': ' . s($createRoomError), 'error');
 }
 
-// Statut + boutons
-echo html_writer::start_div('', ['style' => 'margin:16px 0;padding:24px;background:#f8fafd;border-radius:12px;border:1px solid #e2e8f0;']);
+// V14 — Statut + boutons, en carte avec badge d'icône, titre/sous-titre et légende d'action.
+echo html_writer::start_div('', ['style' =>
+    'margin:16px 0;padding:24px;background:#f8fafd;border-radius:12px;border:1px solid #e2e8f0;'
+]);
 
 if ($apiError) {
     echo $OUTPUT->notification(s($apiErrorMsg), 'warning');
 } elseif (!empty($instance->roomid) && $status) {
     $roomStatus = $status['status'] ?? 'SCHEDULED';
 
+    $badges = [
+        'LIVE'      => ['bg' => '#dcfce7', 'fg' => '#16a34a', 'icon' => null,
+            'title' => 'En direct', 'subtitle' => 'Une session est en cours.'],
+        'ENDED'     => ['bg' => '#e5e7eb', 'fg' => '#4b5563', 'icon' => 'check',
+            'title' => 'Session terminée', 'subtitle' => 'Cette session est terminée.'],
+        'SCHEDULED' => ['bg' => '#dbeafe', 'fg' => '#0065b1', 'icon' => 'clock',
+            'title' => 'Session planifiée', 'subtitle' => 'Aucune session en cours pour le moment.'],
+    ];
+    $badge = $badges[$roomStatus] ?? $badges['SCHEDULED'];
+
+    // Badge : pastille pulsante dédiée pour "En direct", icône sinon.
     if ($roomStatus === 'LIVE') {
-        echo html_writer::div(
-            '<span style="display:inline-flex;align-items:center;gap:6px;color:#2fb344;font-weight:700;">
-                <span style="width:8px;height:8px;border-radius:50%;background:#2fb344;display:inline-block;animation:ls-blink 1.2s ease-in-out infinite;"></span>
-                En direct</span>',
-            '', ['style' => 'margin-bottom:14px;']
-        );
-    } elseif ($roomStatus === 'ENDED') {
-        echo html_writer::div(
-            '<span style="color:#6b7280;">⏹ Session terminée</span>',
-            '', ['style' => 'margin-bottom:14px;']
-        );
+        $badgeInner = '<span style="width:10px;height:10px;border-radius:50%;background:' . $badge['fg'] . ';display:inline-block;animation:ls-blink 1.2s ease-in-out infinite;"></span>';
     } else {
-        echo html_writer::div(
-            '<span style="color:#0065b1;font-weight:600;">⏳ Session planifiée</span>',
-            '', ['style' => 'margin-bottom:14px;']
-        );
+        $badgeInner = livestream_icon($badge['icon'], 20);
     }
 
-    echo html_writer::start_div('', ['style' => 'display:flex;gap:10px;flex-wrap:wrap;']);
+    echo html_writer::start_div('', ['style' => 'display:flex;align-items:center;gap:20px;flex-wrap:wrap;']);
+
+    // Colonne gauche : badge + titre + sous-titre.
+    echo html_writer::start_div('', ['style' => 'display:flex;align-items:center;gap:14px;flex:1;min-width:220px;']);
+    echo html_writer::div($badgeInner, '', ['style' =>
+        'width:40px;height:40px;border-radius:50%;background:' . $badge['bg'] . ';color:' . $badge['fg'] . ';' .
+        'display:flex;align-items:center;justify-content:center;flex-shrink:0;'
+    ]);
+    echo html_writer::start_div();
+    echo html_writer::div(s($badge['title']), '', ['style' => 'font-weight:700;color:#111827;']);
+    echo html_writer::div(s($badge['subtitle']), '', ['style' => 'color:#6b7280;font-size:0.85rem;']);
+    echo html_writer::end_div();
+    echo html_writer::end_div();
+
+    // Séparateur vertical (visible seulement s'il y a une action à droite).
+    $hasAction = $isModerator || $roomStatus === 'LIVE';
+    if ($hasAction) {
+        echo html_writer::div('', '', ['style' => 'width:1px;align-self:stretch;background:#e2e8f0;']);
+    }
+
+    // Colonne droite : bouton principal + légende.
+    echo html_writer::start_div('', ['style' => 'display:flex;flex-direction:column;align-items:flex-start;gap:4px;']);
 
     if ($isModerator) {
         // V02 — sesskey dans l'URL du bouton start
@@ -230,27 +270,35 @@ if ($apiError) {
             'action'  => 'start',
             'sesskey' => sesskey(),
         ]);
-        echo html_writer::link($startUrl, '▶ Démarrer la session',
-            ['style' => 'display:inline-block;padding:10px 24px;background:#0065b1;color:white;border-radius:8px;text-decoration:none;font-weight:600;']
+        echo html_writer::link($startUrl,
+            livestream_icon('play', 16) . ' Démarrer la session',
+            ['style' => 'display:inline-flex;align-items:center;gap:8px;padding:10px 24px;background:#0065b1;color:white;border-radius:8px;text-decoration:none;font-weight:600;']
         );
-    }
-
-    if ($roomStatus === 'LIVE') {
+        echo html_writer::div(
+            $roomStatus === 'LIVE' ? 'Relancez si nécessaire.' : 'Lancez une nouvelle session de webinaire.',
+            '', ['style' => 'color:#9ca3af;font-size:0.8rem;']
+        );
+    } elseif ($roomStatus === 'LIVE') {
         // V02 — sesskey dans l'URL du bouton join
         $joinUrl = new moodle_url('/mod/livestream/view.php', [
             'id'      => $cm->id,
             'action'  => 'join',
             'sesskey' => sesskey(),
         ]);
-        echo html_writer::link($joinUrl, '👁 Rejoindre la session',
-            ['style' => 'display:inline-block;padding:10px 24px;background:#fff;color:#0065b1;border:1.5px solid #0065b1;border-radius:8px;text-decoration:none;font-weight:600;']
+        echo html_writer::link($joinUrl,
+            livestream_icon('eye', 16) . ' Rejoindre la session',
+            ['style' => 'display:inline-flex;align-items:center;gap:8px;padding:10px 24px;background:#fff;color:#0065b1;border:1.5px solid #0065b1;border-radius:8px;text-decoration:none;font-weight:600;']
         );
-    } elseif (!$isModerator) {
+        echo html_writer::div('Rejoignez la session en cours.',
+            '', ['style' => 'color:#9ca3af;font-size:0.8rem;']
+        );
+    } else {
         echo html_writer::div('La session n\'est pas encore en direct.',
-            '', ['style' => 'color:#9ca3af;font-size:0.85rem;padding:8px 0;']
+            '', ['style' => 'color:#9ca3af;font-size:0.85rem;']
         );
     }
 
+    echo html_writer::end_div();
     echo html_writer::end_div();
 } else {
     echo $OUTPUT->notification('Aucune salle associée à cette activité.', 'warning');
@@ -261,16 +309,25 @@ if ($apiError) {
             'action'  => 'createroom',
             'sesskey' => sesskey(),
         ]);
-        echo html_writer::link($createRoomUrl, '🔧 Créer la salle',
-            ['style' => 'display:inline-block;margin-top:10px;padding:10px 24px;background:#0065b1;color:white;border-radius:8px;text-decoration:none;font-weight:600;']
+        echo html_writer::link($createRoomUrl,
+            livestream_icon('tool', 16) . ' Créer la salle',
+            ['style' => 'display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:10px 24px;background:#0065b1;color:white;border-radius:8px;text-decoration:none;font-weight:600;']
         );
     }
 }
 
 echo html_writer::end_div();
 
-// Enregistrements
-echo $OUTPUT->heading(get_string('recordings', 'mod_livestream'), 3);
+// V14 — Enregistrements : en-tête avec icône + compteur.
+echo html_writer::start_div('', ['style' => 'display:flex;align-items:center;gap:10px;margin:24px 0 12px;']);
+echo html_writer::div(livestream_icon('video', 20), '', ['style' => 'color:#0065b1;']);
+echo html_writer::tag('h3', s(get_string('recordings', 'mod_livestream')), ['style' => 'margin:0;']);
+if (!empty($recordings)) {
+    echo html_writer::div(count($recordings) . ' enregistrement(s)',
+        '', ['style' => 'color:#9ca3af;font-size:0.85rem;']
+    );
+}
+echo html_writer::end_div();
 
 if (empty($recordings)) {
     echo html_writer::div('Aucun enregistrement disponible.',
@@ -280,7 +337,7 @@ if (empty($recordings)) {
     $playerData = [];
 
     $table            = new html_table();
-    $table->head      = ['Voir', 'Nom', 'Date', 'Durée', ''];
+    $table->head      = ['Voir', 'Nom de l\'enregistrement', 'Date', 'Durée', 'Actions'];
     $table->align     = ['left', 'left', 'left', 'left', 'center'];
 
     foreach ($recordings as $rec) {
@@ -289,10 +346,13 @@ if (empty($recordings)) {
 
         $playerData[$playerId] = $rec['playUrl'];
 
-        $viewBtn = html_writer::tag('button', 'Voir', [
+        // V14 — bouton icône circulaire au lieu d'un lien texte.
+        $viewBtn = html_writer::tag('button', livestream_icon('eye', 16), [
             'data-player' => $playerId,
             'class'       => 'ls-play-btn',
-            'style'       => 'color:#0065b1;background:none;border:none;cursor:pointer;text-decoration:underline;font-size:0.9rem;',
+            'title'       => get_string('viewrecording', 'mod_livestream'),
+            'style'       => 'display:flex;align-items:center;justify-content:center;width:34px;height:34px;' .
+                'color:#0065b1;background:#eaf3fb;border:none;border-radius:8px;cursor:pointer;',
         ]);
 
         $playerDiv = html_writer::div('', '', [
@@ -316,15 +376,22 @@ if (empty($recordings)) {
                 'recordingid' => $rec['id'],
                 'sesskey'     => sesskey(),
             ]);
-            $actions = html_writer::link($deleteUrl, 'Supprimer', [
-                'style'   => 'color:#e53e3e;font-size:0.85rem;',
+            // V14 — bouton icône (corbeille) au lieu d'un lien texte.
+            $actions = html_writer::link($deleteUrl, livestream_icon('trash', 15), [
+                'title'   => get_string('deleterecording', 'mod_livestream'),
+                'style'   => 'display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;' .
+                    'color:#e53e3e;background:#fff;border:1.5px solid #fecaca;border-radius:8px;text-decoration:none;',
                 'onclick' => 'return confirm("Supprimer cet enregistrement ?")',
             ]);
         }
 
+        // V14 — petite icône vidéo devant le nom du fichier.
+        $nameCell = html_writer::span(livestream_icon('video', 15), '', ['style' => 'color:#9ca3af;margin-right:8px;']) .
+            format_string($rec['name']) . $playerDiv;
+
         $table->data[] = [
             $viewBtn,
-            format_string($rec['name']) . $playerDiv,
+            $nameCell,
             $date,
             $duration,
             $actions,
@@ -368,6 +435,7 @@ if (empty($recordings)) {
 
 echo html_writer::tag('style', "
 @keyframes ls-blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.ls-play-btn:hover { background:#d7e9f7 !important; }
 ");
 
 echo $OUTPUT->footer();
