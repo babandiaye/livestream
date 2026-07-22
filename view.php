@@ -27,6 +27,23 @@ $joinError       = '';
 $startError      = '';
 $deleteError     = '';
 $createRoomError = '';
+$roomReset       = ''; // V15 — motif d'oubli du lien de salle ('backendchanged' | 'roommissing')
+
+// V15 — P1 : le roomid stocké appartient-il encore au backend configuré ? Si
+// l'hôte de l'apiurl a changé depuis la création (ex. activité créée contre
+// preprod-webinaire, désormais pointée sur webinaire), le roomid référence une
+// salle d'un autre backend. On l'oublie pour forcer une recréation propre sur le
+// backend courant — même logique que la réinitialisation à la restauration.
+// Les salles créées avant la V15 n'ont pas d'estampille (roomapihost vide) : leur
+// origine est inconnue ici, c'est P2 (404) qui les rattrapera au besoin.
+if (!empty($instance->roomid) && !empty($instance->roomapihost)
+        && $instance->roomapihost !== livestream_current_apihost()) {
+    $DB->set_field('livestream', 'roomid',      null, ['id' => $instance->id]);
+    $DB->set_field('livestream', 'roomname',    null, ['id' => $instance->id]);
+    $DB->set_field('livestream', 'roomapihost', null, ['id' => $instance->id]);
+    $instance->roomid = $instance->roomname = $instance->roomapihost = null;
+    $roomReset = 'backendchanged';
+}
 
 // V01 + V06 — validation que l'URL retournée appartient au domaine autorisé
 function livestream_validate_redirect_url(string $url): string {
@@ -181,10 +198,24 @@ $apiErrorMsg = '';
 
 if (!empty($instance->roomid)) {
     try {
-        $api        = new mod_livestream_api();
-        $status     = $api->getRoomStatus($instance->roomid);
-        $recData    = $api->getRecordings($instance->roomid);
-        $recordings = $recData['recordings'] ?? [];
+        $api    = new mod_livestream_api();
+        $status = $api->getRoomStatusOrNull($instance->roomid);
+        if ($status === null) {
+            // V15 — P2 : la salle n'existe pas sur ce backend (roomid étranger non
+            // rattrapé par P1 — ex. salle d'avant la V15 —, ou salle supprimée côté
+            // plateforme). On oublie le lien pour proposer une recréation, au lieu
+            // d'afficher une erreur technique.
+            $DB->set_field('livestream', 'roomid',      null, ['id' => $instance->id]);
+            $DB->set_field('livestream', 'roomname',    null, ['id' => $instance->id]);
+            $DB->set_field('livestream', 'roomapihost', null, ['id' => $instance->id]);
+            $instance->roomid = $instance->roomname = $instance->roomapihost = null;
+            if ($roomReset === '') {
+                $roomReset = 'roommissing';
+            }
+        } else {
+            $recData    = $api->getRecordings($instance->roomid);
+            $recordings = $recData['recordings'] ?? [];
+        }
     } catch (Exception $e) {
         $apiError    = true;
         $apiErrorMsg = $e->getMessage();
@@ -211,6 +242,11 @@ if ($deleteError) {
 }
 if ($createRoomError) {
     echo $OUTPUT->notification(get_string('error') . ': ' . s($createRoomError), 'error');
+}
+// V15 — le lien de salle a été oublié (changement de backend ou salle absente) :
+// on informe, la suite de la page proposera « Créer la salle » au modérateur.
+if ($roomReset !== '') {
+    echo $OUTPUT->notification(get_string('roomreset_' . $roomReset, 'mod_livestream'), 'info');
 }
 
 // V14 — Statut + boutons, en carte avec badge d'icône, titre/sous-titre et légende d'action.

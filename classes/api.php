@@ -169,6 +169,26 @@ class mod_livestream_api {
         }
     }
 
+    // V15 — variante tolérante au 404, pour l'auto-réparation (P2). Un 404 sur
+    // /status signifie sans ambiguïté « cette salle n'existe pas sur CE backend »
+    // (le serveur a répondu, la ressource est absente) : soit le roomid a été créé
+    // contre un autre backend, soit la salle a été supprimée côté plateforme. On
+    // renvoie null pour que l'appelant réinitialise le lien et propose « Créer la
+    // salle ». Les autres erreurs (réseau=0, 5xx, 403…) sont propagées telles
+    // quelles : elles ne prouvent pas l'absence de la salle et ne doivent pas
+    // effacer un roomid valide.
+    public function getRoomStatusOrNull(string $roomId): ?array {
+        $roomId = $this->validateId($roomId, 'roomId');
+        try {
+            return $this->request('GET', '/api/moodle/rooms/' . $roomId . '/status');
+        } catch (mod_livestream_api_response_exception $e) {
+            if ($e->httpcode === 404) {
+                return null;
+            }
+            throw $this->translateApiException($e);
+        }
+    }
+
     public function getRecordings(string $roomId): array {
         $roomId = $this->validateId($roomId, 'roomId');
         try {

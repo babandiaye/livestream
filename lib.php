@@ -6,6 +6,18 @@ defined('MOODLE_INTERNAL') || die();
 // (utilisée quand roomid est vide : après restauration, duplication ou import
 // d'activité, cas où roomid/roomname sont volontairement réinitialisés — voir
 // restore_livestream_stepslib.php).
+// V15 — hôte de l'apiurl configuré (ex. "webinaire.unchk.sn"). Sert d'estampille
+// de backend : deux backends (préprod / prod) ont des hôtes distincts. Renvoie
+// une chaîne vide si l'apiurl est absente ou invalide.
+function livestream_current_apihost(): string {
+    $apiurl = (string)get_config('mod_livestream', 'apiurl');
+    if ($apiurl === '') {
+        return '';
+    }
+    $host = parse_url($apiurl, PHP_URL_HOST);
+    return is_string($host) ? $host : '';
+}
+
 function livestream_create_room(stdClass $instance, int $courseId, string $moderatorEmail): array {
     global $DB;
 
@@ -18,8 +30,12 @@ function livestream_create_room(stdClass $instance, int $courseId, string $moder
         $instance->intro ?? ''
     );
 
-    $DB->set_field('livestream', 'roomid',   $result['roomId'],   ['id' => $instance->id]);
-    $DB->set_field('livestream', 'roomname', $result['roomName'], ['id' => $instance->id]);
+    $DB->set_field('livestream', 'roomid',      $result['roomId'],   ['id' => $instance->id]);
+    $DB->set_field('livestream', 'roomname',    $result['roomName'], ['id' => $instance->id]);
+    // V15 — estampille du backend d'origine (P1) : hôte de l'apiurl utilisé pour
+    // créer la salle. Comparé plus tard au backend courant pour détecter un
+    // changement d'URL qui rendrait roomid caduc.
+    $DB->set_field('livestream', 'roomapihost', livestream_current_apihost(), ['id' => $instance->id]);
 
     if (get_config('mod_livestream', 'autoenroll')) {
         livestream_sync_enrollments($courseId, $result['roomId']);
