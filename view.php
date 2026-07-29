@@ -23,6 +23,14 @@ $isModerator = has_capability('mod/livestream:moderate', $context);
 $returnUrl   = (new moodle_url('/mod/livestream/view.php', ['id' => $cm->id]))->out(false);
 $action      = optional_param('action', '', PARAM_ALPHA);
 
+// V16 — la suppression d'un enregistrement est réservée aux ADMINISTRATEURS DU
+// SITE. Auparavant elle suivait mod/livestream:moderate, accordée à teacher,
+// editingteacher et manager : tout enseignant du cours pouvait donc effacer
+// définitivement un enregistrement (le fichier est supprimé de MinIO, pas
+// seulement la ligne en base). is_siteadmin() est délibérément préféré à une
+// capacité dédiée : il n'est pas délégable par attribution d'un rôle.
+$canDeleteRecording = is_siteadmin();
+
 $joinError       = '';
 $startError      = '';
 $deleteError     = '';
@@ -145,7 +153,11 @@ if ($action === 'start' && $isModerator && !empty($instance->roomid)) {
 }
 
 // ── DELETE RECORDING ─────────────────────────────────────────────────────────
-if ($action === 'deleterecording' && $isModerator) {
+// V16 — le contrôle porte sur l'ACTION, pas seulement sur l'affichage du bouton :
+// l'URL /view.php?action=deleterecording&recordingid=…&sesskey=… reste forgeable
+// par tout enseignant, et sesskey ne prouve que l'origine de la requête, pas le
+// droit de supprimer.
+if ($action === 'deleterecording' && $canDeleteRecording) {
     require_sesskey();
     $recordingId = required_param('recordingid', PARAM_ALPHANUMEXT);
     try {
@@ -373,8 +385,14 @@ if (empty($recordings)) {
     $playerData = [];
 
     $table            = new html_table();
-    $table->head      = ['Voir', 'Nom de l\'enregistrement', 'Date', 'Durée', 'Actions'];
-    $table->align     = ['left', 'left', 'left', 'left', 'center'];
+    // V16 — la colonne « Actions » ne contient que la corbeille : inutile de la
+    // laisser, vide, à ceux qui n'ont pas le droit de supprimer.
+    $table->head      = ['Voir', 'Nom de l\'enregistrement', 'Date', 'Durée'];
+    $table->align     = ['left', 'left', 'left', 'left'];
+    if ($canDeleteRecording) {
+        $table->head[]  = 'Actions';
+        $table->align[] = 'center';
+    }
 
     foreach ($recordings as $rec) {
         $safeId   = preg_replace('/[^a-zA-Z0-9_-]/', '', $rec['id']);
@@ -404,8 +422,8 @@ if (empty($recordings)) {
             get_string('strftimedatefullshort', 'langconfig')
         );
 
-        $actions = '';
-        if ($isModerator) {
+        $actions = null;
+        if ($canDeleteRecording) { // V16 — administrateurs du site uniquement
             $deleteUrl = new moodle_url('/mod/livestream/view.php', [
                 'id'          => $cm->id,
                 'action'      => 'deleterecording',
@@ -425,13 +443,11 @@ if (empty($recordings)) {
         $nameCell = html_writer::span(livestream_icon('video', 15), '', ['style' => 'color:#9ca3af;margin-right:8px;']) .
             format_string($rec['name']) . $playerDiv;
 
-        $table->data[] = [
-            $viewBtn,
-            $nameCell,
-            $date,
-            $duration,
-            $actions,
-        ];
+        $row = [$viewBtn, $nameCell, $date, $duration];
+        if ($canDeleteRecording) {
+            $row[] = $actions;
+        }
+        $table->data[] = $row;
     }
 
     echo html_writer::table($table);
