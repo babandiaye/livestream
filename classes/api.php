@@ -145,7 +145,11 @@ class mod_livestream_api {
         return new moodle_exception('apierror', 'mod_livestream', '', $e->apimessage, $debuginfo);
     }
 
-    public function createRoom(string $courseId, string $meetingId, string $title, string $moderatorEmail, string $description = ''): array {
+    // V17 — $moderatorName est désormais transmis : la plateforme provisionne le
+    // compte animateur s'il n'existe pas encore, et User.name y est obligatoire.
+    // Sans lui, elle retomberait sur la partie locale de l'email.
+    public function createRoom(string $courseId, string $meetingId, string $title, string $moderatorEmail, string $moderatorName, string $description = ''): array {
+        $moderatorName = $this->sanitizeUserName($moderatorName); // V08
         try {
             return $this->request('POST', '/api/moodle/rooms', [
                 'courseId'       => $courseId,
@@ -153,6 +157,7 @@ class mod_livestream_api {
                 'title'          => $title,
                 'description'    => $description,
                 'moderatorEmail' => $this->validateEmail($moderatorEmail),
+                'moderatorName'  => $moderatorName,
             ]);
         } catch (mod_livestream_api_response_exception $e) {
             // Sur cet endpoint, un 404 signifie "compte modérateur introuvable" (V11).

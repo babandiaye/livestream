@@ -187,7 +187,7 @@ if ($action === 'createroom' && $isModerator && empty($instance->roomid)) {
     require_sesskey(); // V02 — protection CSRF
     livestream_check_ratelimit('createroom'); // V05
     try {
-        livestream_create_room($instance, $course->id, $USER->email);
+        livestream_create_room($instance, $course->id, $USER->email, fullname($USER));
 
         // V09 — journalisation audit : salle créée
         \mod_livestream\event\room_created::create([

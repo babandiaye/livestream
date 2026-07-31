@@ -18,7 +18,9 @@ function livestream_current_apihost(): string {
     return is_string($host) ? $host : '';
 }
 
-function livestream_create_room(stdClass $instance, int $courseId, string $moderatorEmail): array {
+// V17 — $moderatorName transmis jusqu'à l'API : la plateforme s'en sert pour
+// nommer le compte animateur qu'elle provisionne au besoin.
+function livestream_create_room(stdClass $instance, int $courseId, string $moderatorEmail, string $moderatorName): array {
     global $DB;
 
     $api    = new mod_livestream_api();
@@ -27,6 +29,7 @@ function livestream_create_room(stdClass $instance, int $courseId, string $moder
         (string)$instance->id,
         $instance->name,
         $moderatorEmail,
+        $moderatorName,
         $instance->intro ?? ''
     );
 
@@ -55,7 +58,7 @@ function livestream_add_instance(stdClass $data, mod_livestream_mod_form $mform 
         $id = $DB->insert_record('livestream', $data);
         $data->id = $id;
 
-        livestream_create_room($data, $data->course, $USER->email);
+        livestream_create_room($data, $data->course, $USER->email, fullname($USER));
 
         // V09 — journalisation audit : salle créée
         // Note : le context module n'est pas encore disponible à ce stade (l'activité
